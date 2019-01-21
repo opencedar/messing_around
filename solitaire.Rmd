@@ -1,0 +1,239 @@
+---
+title: "Solitaire from the Neal Stephenson's Book Cryptonomicon"
+author: "Andy Hasselwander"
+date: "1/20/2019"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Overview
+In Neal Stephenson's book _Cryptonomicon_, a simple cipher is described whereby two people can communicate securely, without a computer, using a deck of cards. The only two requirements are that they both need to know the "game" (in this case termed _Solitaire_), and they need to agree on a key—that is, a starting position for the deck. This program shows how to play the game using an R program. Of course, this essentially defeats the purpose of using a deck of cards, but it's a fun exercise to understand some basics of crytography, using something everyone has familiarity with: a deck of cards.
+
+This program runs entirely in base `R` and requires no additional packages. However, if you'd like to knit to a webpage, you'll need `RStudio` and `knitr`; you'll also need `pandoc` if you want a nice-looking PDF.
+
+## Create a deck of cards
+Cards are ordered in ascending order of "value". In other words, a 2 of Clubs is a 1, and an Ace of Spades is a 52. 
+
+```{r}
+deck <- data.frame(number =
+                      c(rep(c("2","3","4","5","6","7","8","9","10","jack", "queen", "king", "ace"), times=4),c("1", "2")),
+                      suit = c(rep("clubs", times=13), rep("diamonds", times=13), rep("hearts", times = 13), rep("spades", times = 13), c("joker", "joker")),
+                      color = c(rep("black", times=13), rep("red", times=13),
+                                rep("red", times=13), rep("black", times=13),c(NA, NA)),
+                      fiftyThreeValue = c(1:52, 53,53),
+                      twentySixValue = c(1:26, 1:26, NA, NA)
+)
+                        
+```
+
+## Pick a card, any card
+
+```{r}
+card <- sample(1:54, 1)
+
+print(deck[card,])
+
+```
+
+## Shuffle the deck (create the key)
+```{r}
+set.seed(42)
+shuffle <- sample(1:54, 54, replace = FALSE)
+deck <- deck[shuffle,]
+deck
+```
+
+# Helper Algorithms
+## Card switching algorithm
+Swap any two cards in the deck, based on position.
+
+```{r}
+cardSwap <- function(deck, pos1, pos2) {
+  pos1Value <- deck[pos1,]
+  pos2Value <- deck[pos2,]
+  deck[pos1,] <- pos2Value
+  deck[pos2,] <- pos1Value
+return(deck)
+}
+```
+
+## Deck cutting algorithm
+Swap two section of the deck. Must be continuous vectors with the first vector coming before the second.
+
+```{r}
+ rowSwap <- function (deck, top, bottom) {
+    if(is.null(top[length(top)])) { a <- NULL} else { a <- top}
+    
+    if(is.null(top) & is.null(bottom)) {b <- 1: nrow(deck)} else
+      if(is.null(top)) {b <-  (1:bottom[1]-1)} else
+      if (is.null(bottom)) {b <- ((top[length(top)]+1):nrow(deck))} else
+      if(top[length(top)]==(bottom[1]-1)) {b <- NULL} else 
+        {b <- ((top[length(top)]+1) : (bottom[1]-1))}
+    
+    if(is.null(bottom[1])) {c <- NULL} else {c <-bottom}
+    
+    aRows <- deck[a,]
+    bRows <- deck[b,]
+    cRows <- deck[c,]
+    
+    if(length(aRows)==0 & length(cRows)==0) {outputdeck <- bRows} else 
+      if(length(aRows)==0) {outputdeck <- rbind(cRows, bRows)} else 
+      if(length(cRows)==0) {outputdeck <- rbind(cRows, aRows)} else 
+      {outputdeck <- rbind(cRows, bRows, aRows)}
+    return(outputdeck)
+  }
+
+```
+
+# The Solitaire algorithm
+The Solitaire algorithm is broken down into five parts.
+
+## The Joker Swap
+Find the A Joker. Move it one card down. (That is, swap it with the card beneath it.) If the Joker is the bottom card of the deck, move it just below the top card. Now, find the B Joker. Move it two cards down. If the Joker is the bottom card of the deck, move it just below the second card. If the Joker is one up from the bottom card, move it just below the top card. (Basically, assume the deck is a loop. You get the idea.)
+```{r}
+jokerSwap <- function(deck) {
+joker1Pos <- which(deck$number == '1' & deck$suit == 'joker')
+  joker2Pos <- which(deck$number == '2' & deck$suit == 'joker')
+    if(joker1Pos == 54) {joker1FPos <- 1} else {joker1FPos <- (joker1Pos + 1)}
+    if(joker2Pos >= 53) {joker2FPos <- (joker2Pos -54 + 2)} else {joker2FPos <- (joker2Pos + 2)}
+  #First joker swap
+  deck <- cardSwap(deck, joker1Pos, joker1FPos)
+  #Second joker swap
+  deck <- cardSwap(deck, joker2Pos, joker2FPos)
+  return(deck)}
+```
+
+## The Triple Cut
+Swap the cards above first joker with the cards below the second joker. "First" and "second" jokers refer to whatever Joker is nearest to, and furthest from, the top of the deck. Ignore the "A" and "B" designations for this step.
+```{r}
+tripleCut <- function(deck) {
+  joker1Pos <- which(deck$number == '1' & deck$suit == 'joker')
+  joker2Pos <- which(deck$number == '2' & deck$suit == 'joker')
+  jokerPosOrdered <- sort(c(joker1Pos, joker2Pos))
+    if(jokerPosOrdered[1]==1) {top <- NULL} else {top <- 1:(jokerPosOrdered[1]-1)}
+    if(jokerPosOrdered[2]==54) {bottom <- NULL} else {bottom <- (jokerPosOrdered[2]+1):54}
+  deck <- rowSwap(deck, top, bottom)
+  return(deck)
+}
+```
+
+## The Count Cut
+Look at the bottom card. Convert it to a number from 1 through 53. (Use the bridge order of suits: clubs, diamonds, hearts, and spades. If the card is a club, it is the value shown. Keep adding 13 otherwise. Both jokers get a value of 53.) Note that this step was done when creating the original deck above. If a joker is in the last position, then effectively there's no cut (because the cut is at the bottom of the 53-card deck.)
+```{r}
+countCut <- function(deck) {
+  bottomCardValue <- deck$fiftyThreeValue[nrow(deck)]
+  deck53 <- deck[1:53,]
+  deck54 <- deck[54,]
+  if(bottomCardValue == 53) {bottom <- NULL} else {bottom <- (bottomCardValue+1):nrow(deck53)
+  }
+  top <- 1:bottomCardValue
+ if(is.null(top) | is.null(bottom)) {decck53 <- deck53} else {
+    deck53 <- rowSwap(deck53, top, bottom)}
+
+  deckFinal <- rbind(deck53, deck54)
+  return(deckFinal)
+}
+```
+
+## Find the Output Card
+Look at the top card. Convert it to a number from 1 to 53, using Bridge values (see Count Cut description above.) Count down that many cards (count the top card as number one.) Write the card _after_ the one you counted to on a piece of paper (on in this case, in memory.) If you hit a joker, don't write anything down and start over. This is the first output card.
+
+Now, convert this card to a number. Use the Bridge suits to order them, but in this case, count up to 26 (the number of letters in the alphabet) through diamonds and then start over. In this case, this value is stored as "twentySixValue" in our `deck` data.frame.
+
+```{r}
+outputCard <- function(deck) {
+  count <- deck$fiftyThreeValue[1]
+  value <- deck$twentySixValue[count]
+  return(value)
+}
+
+```
+
+
+# Running the loop to generate a keystream
+Let's do a keystream of 100. `NA`'s represent jokers, and are ignored (skipped over) by the algorithm.
+```{r}
+keyStream <- function(deck, nchar) {
+keyVector <- vector()
+while(length(keyVector) < nchar)
+{
+  deck <- jokerSwap(deck)
+  deck <-tripleCut(deck)
+  deck <- countCut(deck)
+  output <- outputCard(deck)
+  
+  if(!is.na(output)) {keyVector <- c(keyVector, output)}
+}
+return(keyVector)
+}
+
+keyStream(deck, 100)
+```
+
+
+# Encrypt a message
+
+## 1. Generating the keystream
+In his book `Cryptonomicon` Enoch Root warns Randy Waterhouse that his laptop's screen is being monitored by Van Eck Phreaking devices in his jail cell, and sends him the message "DO NOT USE PC". First, we need to generate a keystream of that length.
+```{r}
+message <- 'donotusepc'
+messageKS <- keyStream(deck, nchar(message))
+messageKS
+```
+
+## 2. Convert the message into numbers
+Simply, `A = 1`, `B = 2`, and so on, up to 26.
+```{r}
+letterLookup <- data.frame(letters = letters, numbers = 1:26, stringsAsFactors = FALSE)
+messageDF <- data.frame(order = 1:nchar(message),letters = unlist(strsplit(message, '')), stringsAsFactors = FALSE)
+messageNumbers <- merge(messageDF, letterLookup, all.x=TRUE, all.y = FALSE, by = 'letters', sort=FALSE)
+messageNumbers <- messageNumbers[order(messageNumbers$order),]
+messageNumbers <- messageNumbers$numbers
+messageNumbers
+```
+
+## 3. Add the keystream to the message, modulo 26
+`Modulo 26` simply means to subtract 26 if the sum is greater than 26. This would be the transmitted message. Note the use of `mapply()` to vectorize the function over two vectors of equal length.
+
+```{r}
+modulo26Add <- function(x,y) {
+  z <- x + y
+  if(z > 26) {z <- z-26}
+  return(z)
+}
+messageEncrypted <- mapply(modulo26Add, messageNumbers, messageKS)
+messageEncrypted
+```
+
+# Decrypt a message
+
+## 1. Generate the decrypted letter-numbers
+Now, the user has the same deck of cards (key) and gets the message. They simply generate the same keystream using their deck of cards, and then subtract the keystream, modulo 26, from the encrypted message.
+
+```{r}
+modulo26Subtract <- function(x,y) {
+  z <- x - y
+  if(z < 1) {z <- z+26}
+  return(z)
+}
+
+messageDecrypted <- mapply(modulo26Subtract, messageEncrypted, messageKS)
+messageDecrypted
+
+```
+## 2. Finally, convert back to text
+Simply find the equivalent letter to the number. Better not use the PC!
+```{r}
+decrypytNumbersDF <- data.frame(order = 1:length(messageDecrypted), numbers = messageDecrypted, stringsAsFactors = FALSE)
+decryptLetters <- merge(decrypytNumbersDF, letterLookup, all.x=TRUE, all.y=FALSE, by = 'numbers', sort=FALSE)
+decryptLetters <-decryptLetters[order(decryptLetters$order),]
+decryptLetters <- decryptLetters$letters
+
+decryptLetters
+
+```
